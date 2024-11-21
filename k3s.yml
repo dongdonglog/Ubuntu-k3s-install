@@ -1,0 +1,217 @@
+---
+- name: Update /etc/hosts file
+  hosts: master,works,master-ext
+  become: yes
+
+  tasks:
+    - name: Check if /etc/hosts is updated
+      stat:
+        path: /tmp/ansible_hosts_updated
+      register: hosts_file_updated
+
+    - name: Add master IP to /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{  hostvars[item]['ansible_default_ipv4']['address'] }}  {{ hostvars[item]['ansible_hostname'] }}"
+      loop: "{{ groups['master'] + groups['works'] + groups['master-ext']}}"
+      when: not hosts_file_updated.stat.exists
+
+    - name: Create a flag file to indicate /etc/hosts is updated
+      command: touch /tmp/ansible_hosts_updated
+      when: not hosts_file_updated.stat.exists
+
+
+- name: Manage UFW firewall
+  hosts: master,works,master-ext
+  become: yes
+
+  tasks:
+    - name: Disable UFW firewall
+      command: ufw disable
+      ignore_errors: yes
+
+    - name: Stop UFW service
+      service:
+        name: ufw
+        state: stopped
+      ignore_errors: yes
+
+    - name: Disable UFW service from starting on boot
+      service:
+        name: ufw
+        enabled: no
+      ignore_errors: yes
+
+- name: Configure sysctl settings on all machines
+  hosts: master,works,master-ext
+  become: yes
+
+  tasks:
+    - name: Set sysctl parameters
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        sysctl_file: /etc/sysctl.conf
+        state: present
+        reload: yes
+      with_items:
+        - { name: 'vm.swappiness', value: '0' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+        - { name: 'net.core.somaxconn', value: '65535' }
+        - { name: 'net.core.netdev_max_backlog', value: '2500' }
+        - { name: 'net.ipv4.tcp_tw_reuse', value: '1' }
+        - { name: 'net.ipv4.tcp_keepalive_time', value: '600' }
+        - { name: 'net.ipv4.tcp_keepalive_intvl', value: '30' }
+        - { name: 'net.ipv4.tcp_keepalive_probes', value: '10' }
+        - { name: 'net.core.rmem_max', value: '16777216' }
+        - { name: 'net.core.wmem_max', value: '16777216' }
+        - { name: 'net.ipv4.tcp_rmem', value: '4096 87380 16777216' }
+        - { name: 'net.ipv4.tcp_wmem', value: '4096 87380 16777216' }
+        - { name: 'net.core.optmem_max', value: '81920' }
+        - { name: 'net.ipv4.tcp_mem', value: '8388608 8388608 8388608' }
+        - { name: 'net.ipv4.tcp_adv_win_scale', value: '2' }
+
+    - name: Apply sysctl changes
+      command: sysctl -p
+
+- name: Install K3s Base
+  hosts: master,works,master-ext
+  become: yes
+
+  tasks:
+    - name: Create directory for K3s images
+      file:
+        path: /var/lib/rancher/k3s/agent/images/
+        state: directory
+        mode: '0755'
+
+    - name: Check if K3s image file exists
+      stat:
+        path: /var/lib/rancher/k3s/agent/images/k3s-airgap-images-amd64.tar
+      register: k3s_image_file
+
+    - name: Download K3s image file if not exists
+      get_url:
+ #       url: https://xxx.com/k3s-airgap-images-amd64.tar
+        url:
+        dest: /var/lib/rancher/k3s/agent/images/k3s-airgap-images-amd64.tar
+        mode: '0644'
+      when: not k3s_image_file.stat.exists
+
+    - name: Copy install.sh script to remote host
+      copy:
+        src: install.sh
+        dest: /tmp/install.sh
+        mode: '0755'
+
+    - name: Check if K3s binary exists
+      stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary_file
+
+    - name: Download K3s binary if not exists
+      get_url:
+   #     url: https://xxx.com/k3s
+        url:
+        dest: /usr/local/bin/k3s
+        mode: '0755'
+      when: not k3s_binary_file.stat.exists
+
+- name: Master install k3s
+  hosts: master
+  become: yes
+
+  tasks:
+    - name: RUn master k3s
+      shell: |
+        K3S_TOKEN="moyingkeji-pingtai-token" INSTALL_K3S_SKIP_DOWNLOAD=true /tmp/install.sh server \
+        --cluster-init \
+        --disable=servicelb \
+        --write-kubeconfig-mode=0644 \
+        --flannel-backend=host-gw \
+        --prefer-bundled-bin \
+        --default-local-storage-path /data/k3s-storage
+      args:
+        chdir: /tmp
+
+    - name: Check if Helm is already installed
+      command: helm version --short
+      register: helm_check
+      ignore_errors: yes
+      failed_when: false
+
+    - name: Download Helm
+      when: helm_check.rc != 0
+      get_url:
+   #     url: "https://xxx.com/helm-v3.9.4-linux-amd64.tar.gz"
+        url:
+        dest: "/tmp/helm-v3.9.4-linux-amd64.tar.gz"
+
+    - name: Extract Helm
+      when: helm_check.rc != 0
+      unarchive:
+        src: "/tmp/helm-v3.9.4-linux-amd64.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+        extra_opts: [--strip-components=1]
+
+    - name: Move Helm binary to /usr/local/bin
+      when: helm_check.rc != 0
+      copy:
+        src: "/tmp/helm"
+        dest: "/usr/local/bin/helm"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Set Helm binary as executable
+      when: helm_check.rc != 0
+      file:
+        path: "/usr/local/bin/helm"
+        mode: '0755'
+
+    - name: Ensure .kube directory exists
+      file:
+        path: ~/.kube
+        state: directory
+        mode: '0755'
+
+    - name: Copy k3s config to .kube/config
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ~/.kube/config
+        remote_src: yes
+
+    - name: Helm installation check
+      command: helm version --short
+      when: helm_check.rc != 0
+      register: helm_version
+      changed_when: false
+
+    - name: Output Helm version
+      debug:
+        msg: "Helm version: {{ helm_version.stdout }}"
+
+- name: master-ext install k3s
+  hosts: master-ext
+  become: yes
+
+  tasks:
+    - name: Run master-ext
+      shell: |
+        K3S_TOKEN="moyingkeji-pingtai-token" INSTALL_K3S_SKIP_DOWNLOAD=true /tmp/install.sh server \
+        --server https://{{ hostvars[groups['master'][0]].ansible_default_ipv4.address }}:6443 \
+        --flannel-backend=host-gw
+      args:
+        chdir: /tmp
+
+- name: works install k3s
+  hosts: works
+  become: yes
+
+  tasks:
+    - name: Run works
+      shell: |
+        K3S_TOKEN="moyingkeji-pingtai-token" INSTALL_K3S_SKIP_DOWNLOAD=true /tmp/install.sh agent \
+        --server https://{{ hostvars[groups['master'][0]].ansible_default_ipv4.address }}:6443
+      args:
+        chdir: /tmp

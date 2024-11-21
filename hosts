@@ -1,0 +1,9 @@
+[master]
+10.10.63.222 ansible_ssh_user=
+
+[master-ext]
+10.10.61.46 ansible_ssh_user=
+
+[works]
+10.10.63.239 ansible_ssh_user=
+10.10.62.103 ansible_ssh_user=

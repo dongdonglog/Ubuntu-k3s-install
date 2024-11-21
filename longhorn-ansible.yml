@@ -1,0 +1,36 @@
+---
+- name: Import Longhorn images
+  hosts: master,works,master-ext
+  become: yes
+
+  tasks:
+    - name: Download Longhorn images tarball
+      shell: |
+    #    wget -O /tmp/longhorn.tar.gz https://xxx.com/longhorn.tar.gz
+      register: wget_result
+
+    - name: Check if curl download succeeded
+      fail:
+        msg: "Download failed"
+      when: wget_result.rc != 0
+
+    - name: Extract Longhorn images tarball
+      shell: tar -xzvf /tmp/longhorn.tar.gz -C /tmp
+      args:
+        executable: /bin/bash
+
+    - name: Import Longhorn images
+      shell: |
+        for img in /tmp/longhorn/*.tar; do
+          ctr images import "$img"
+        done
+      args:
+        executable: /bin/bash
+
+- name: Run longhorn Yaml
+  hosts: master
+  become: yes
+
+  tasks:
+    - name: Run Longhorn YAML
+      command: kubectl apply -f longhorn.yaml
