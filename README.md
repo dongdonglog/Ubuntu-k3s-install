@@ -1,14 +1,17 @@
-# moying-k3s-ansible
+# k3s-ansible-install-ubuntu
 
 高可用或者单机ansible安装教程
 ### 架构为：containered+flannel+treafik
 
-## <span style="color:red;">注意：请规划好服务器和机器人的IP</span>
+## <span style="color:red;">注意：请规划好服务器IP</span>
 
 ## 克隆项目
 ```
 git clone https://gitlab.moyingrobotics.com/platform/devops/moying-k3s.git
 ```
+
+## 前提条件
+去你需要的k3s版本下面目录下载镜像包和helm版本包丢到机器可以访问的仓库，修改k3s.yaml
 
 ## 第一步
 修改user-passwd-ip.txt文件，第一行请填写工作的机器也就是即将部署的机器，格式为用户名,密码，ip，这边建议机器的密码都统一，不然后面运行不了ansible脚本
