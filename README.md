@@ -5,11 +5,6 @@
 
 ## <span style="color:red;">注意：请规划好服务器IP</span>
 
-## 克隆项目
-```
-git clone https://gitlab.moyingrobotics.com/platform/devops/moying-k3s.git
-```
-
 ## 前提条件
 去你需要的k3s版本下面目录下载镜像包和helm版本包丢到机器可以访问的仓库，修改k3s.yaml
 
